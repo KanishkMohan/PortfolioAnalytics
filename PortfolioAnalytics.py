@@ -42,9 +42,16 @@ def get_live_price_fast(symbol):
         ticker = f"{symbol}.NS"
         stock = yf.Ticker(ticker)
         
-        # Use fast_info for better performance
-        last_price = stock.fast_info.get('lastPrice')
-        previous_close = stock.fast_info.get('previousClose')
+        # Use both fast_info and info for better compatibility
+        last_price = getattr(stock, 'fast_info', {}).get('lastPrice')
+        if not last_price:
+            info = stock.info
+            last_price = info.get('currentPrice') or info.get('regularMarketPrice')
+        
+        previous_close = getattr(stock, 'fast_info', {}).get('previousClose')
+        if not previous_close:
+            info = stock.info
+            previous_close = info.get('previousClose')
         
         if last_price and previous_close:
             change = last_price - previous_close
@@ -65,7 +72,7 @@ def search_stocks(query, stocks_df):
     mask = (stocks_df['Symbol'].str.upper().str.contains(query)) | \
            (stocks_df['Company'].str.upper().str.contains(query))
     
-    return stocks_df[mask].head(15)  # Show more results for better search
+    return stocks_df[mask].head(15)
 
 def add_to_portfolio(symbol, weight, company_name):
     """Add stock to portfolio"""
@@ -78,7 +85,6 @@ def add_to_portfolio(symbol, weight, company_name):
         'company': company_name,
         'ticker': f"{symbol}.NS"
     }
-    # Reset analysis when portfolio changes
     st.session_state.analysis_generated = False
     return True
 
@@ -86,7 +92,6 @@ def remove_from_portfolio(symbol):
     """Remove stock from portfolio"""
     if symbol in st.session_state.portfolio:
         del st.session_state.portfolio[symbol]
-        # Reset analysis when portfolio changes
         st.session_state.analysis_generated = False
         return True
     return False
@@ -95,7 +100,6 @@ def update_portfolio_weight(symbol, new_weight):
     """Update weight for a stock in portfolio"""
     if symbol in st.session_state.portfolio:
         st.session_state.portfolio[symbol]['weight'] = new_weight
-        # Reset analysis when weights change
         st.session_state.analysis_generated = False
         return True
     return False
@@ -106,12 +110,11 @@ def normalize_portfolio_weights():
     if total_weight > 0:
         for symbol in st.session_state.portfolio:
             st.session_state.portfolio[symbol]['weight'] = (st.session_state.portfolio[symbol]['weight'] / total_weight) * 100
-        # Reset analysis when weights change
         st.session_state.analysis_generated = False
         return True
     return False
 
-@st.cache_data(ttl=600)  # Cache for 10 minutes
+@st.cache_data(ttl=600)
 def download_portfolio_data(tickers, start_date, end_date):
     """Download historical data with caching"""
     try:
@@ -127,41 +130,33 @@ def calculate_portfolio_analysis(start_date, end_date):
         return None, None, "Portfolio is empty"
     
     try:
-        # Validate date range
         if start_date >= end_date:
             return None, None, "Start date must be before end date"
         
-        # Prepare data for analysis
         tickers = [stock['ticker'] for stock in st.session_state.portfolio.values()]
         weights = [stock['weight'] for stock in st.session_state.portfolio.values()]
         
-        # Convert weights to fractions (0-1)
         total_weight = sum(weights)
         if total_weight <= 0:
             return None, None, "Total portfolio weight must be greater than 0"
         
         weights = [w / total_weight for w in weights]
         
-        # Download data with caching
         data = download_portfolio_data(tickers, start_date, end_date)
         
         if data.empty:
             return None, None, "No historical data available for the selected stocks and period"
         
-        # Calculate returns
         returns = data.pct_change().dropna()
         
         if returns.empty:
             return None, None, "No return data available after processing"
         
-        # Calculate portfolio returns
         portfolio_returns = (returns * weights).sum(axis=1)
         
-        # Validate the returns data
         if len(portfolio_returns) < 10:
             return None, None, "Insufficient data points for analysis"
         
-        # Ensure datetime index for quantstats
         if not isinstance(portfolio_returns.index, pd.DatetimeIndex):
             portfolio_returns.index = pd.to_datetime(portfolio_returns.index)
         
@@ -176,18 +171,15 @@ def generate_quantstats_report(portfolio_returns):
         temp_dir = tempfile.mkdtemp()
         report_path = os.path.join(temp_dir, "portfolio_report.html")
         
-        # Generate report
         qs.reports.html(
             portfolio_returns,
             output=report_path,
-            title='Portfolio Analysis Report',
-            download_filename=report_path
+            title='Portfolio Analysis Report'
         )
         
         with open(report_path, "r", encoding='utf-8') as f:
             html_report = f.read()
         
-        # Cleanup
         os.remove(report_path)
         os.rmdir(temp_dir)
         
@@ -200,7 +192,6 @@ with st.sidebar:
     st.header("🔍 NSE Stock Search Engine")
     st.markdown("---")
     
-    # Load complete NSE stock list
     with st.spinner("Loading NSE stock database..."):
         stocks_df = load_stock_list()
     
@@ -210,14 +201,12 @@ with st.sidebar:
     
     st.success(f"✅ Loaded {len(stocks_df)} NSE stocks")
     
-    # Search Section
     query = st.text_input(
         "Search any NSE stock:",
         placeholder="Type symbol or company name...",
         key="search_input"
     )
     
-    # Search results
     if query and len(query) >= 2:
         with st.spinner("Searching..."):
             results = search_stocks(query, stocks_df)
@@ -235,7 +224,6 @@ with st.sidebar:
                         st.write(f"`{symbol}`")
                     
                     with col2:
-                        # Quick price check
                         price, _, _, _ = get_live_price_fast(symbol)
                         if price:
                             st.write(f"₹{price:.1f}")
@@ -243,7 +231,6 @@ with st.sidebar:
                     with col3:
                         if symbol not in st.session_state.portfolio:
                             if st.button("➕", key=f"add_{symbol}"):
-                                # Add with default weight
                                 if add_to_portfolio(symbol, 0, company):
                                     st.rerun()
                         else:
@@ -253,21 +240,18 @@ with st.sidebar:
             else:
                 st.warning("No stocks found. Try different keywords.")
     
-    # Current Portfolio Section
     st.header("📊 Your Portfolio")
     st.markdown("---")
     
     if st.session_state.portfolio:
         total_weight = sum(stock['weight'] for stock in st.session_state.portfolio.values())
         
-        # Portfolio statistics
         col1, col2 = st.columns(2)
         with col1:
             st.metric("Stocks", len(st.session_state.portfolio))
         with col2:
             st.metric("Total Weight", f"{total_weight:.1f}%")
         
-        # Portfolio stocks with weight controls
         for symbol, stock_data in st.session_state.portfolio.items():
             st.write(f"**{symbol}** - {stock_data['company']}")
             
@@ -291,7 +275,6 @@ with st.sidebar:
             
             st.markdown("---")
         
-        # Weight management
         if abs(total_weight - 100.0) > 0.1:
             st.warning(f"⚠️ Weights sum to {total_weight:.1f}% (should be 100%)")
             
@@ -309,7 +292,6 @@ with st.sidebar:
                     st.session_state.analysis_generated = False
                     st.rerun()
         
-        # Portfolio actions
         if st.button("🗑️ Clear Entire Portfolio", type="secondary", use_container_width=True):
             st.session_state.portfolio = {}
             st.session_state.analysis_generated = False
@@ -318,16 +300,14 @@ with st.sidebar:
     else:
         st.info("👆 Search for stocks above and add them to your portfolio to get started.")
         st.markdown("💡 **Tips:**")
-        st.markdown("- Search by symbol (e.g., 'RELIANCE') or company name (e.g., 'Reliance Industries')")
+        st.markdown("- Search by symbol (e.g., 'RELIANCE') or company name")
         st.markdown("- Add multiple stocks to build your portfolio")
         st.markdown("- Set weights for each stock (must total 100%)")
-        st.markdown("- Generate analysis in the main area")
 
 # --- Main Area: Portfolio Analytics ---
 st.title("📊 NSE Portfolio Analytics Dashboard")
 st.markdown("Build your portfolio using the search engine in the sidebar →")
 
-# Date Range Selection
 col1, col2, col3 = st.columns([1, 1, 2])
 
 with col1:
@@ -336,7 +316,6 @@ with col1:
 with col2:
     end_date = st.date_input("End Date", value=date.today(), key="end_date")
 
-# Reset analysis when dates change
 if 'last_start_date' not in st.session_state:
     st.session_state.last_start_date = start_date
 if 'last_end_date' not in st.session_state:
@@ -349,14 +328,13 @@ if (st.session_state.last_start_date != start_date or
     st.session_state.last_end_date = end_date
 
 with col3:
-    st.write("")  # Spacer
+    st.write("")
     st.write("")
     generate_clicked = st.button("🚀 Generate Portfolio Analysis", 
                                type="primary", 
                                use_container_width=True,
                                disabled=len(st.session_state.portfolio) == 0)
 
-# Generate analysis when button clicked
 if generate_clicked:
     if not st.session_state.portfolio:
         st.error("Please add stocks to your portfolio first!")
@@ -370,7 +348,6 @@ if generate_clicked:
             st.session_state.analysis_generated = True
             st.rerun()
 
-# Portfolio Analysis Results
 if st.session_state.analysis_generated and st.session_state.portfolio:
     with st.spinner("🔄 Analyzing portfolio performance..."):
         portfolio_returns, stock_data, analysis_msg = calculate_portfolio_analysis(start_date, end_date)
@@ -378,7 +355,6 @@ if st.session_state.analysis_generated and st.session_state.portfolio:
         if portfolio_returns is not None:
             st.success("✅ Portfolio Analysis Complete!")
             
-            # Performance Metrics
             st.subheader("📊 Portfolio Performance Metrics")
             col1, col2, col3, col4 = st.columns(4)
             
@@ -401,11 +377,9 @@ if st.session_state.analysis_generated and st.session_state.portfolio:
             except Exception as e:
                 st.error(f"Error calculating metrics: {str(e)}")
             
-            # Visualizations
             col1, col2 = st.columns(2)
             
             with col1:
-                # Portfolio Allocation
                 st.subheader("Portfolio Allocation")
                 allocation_data = {
                     'Symbol': list(st.session_state.portfolio.keys()),
@@ -423,7 +397,6 @@ if st.session_state.analysis_generated and st.session_state.portfolio:
                 st.plotly_chart(fig_pie, use_container_width=True)
             
             with col2:
-                # Cumulative Returns
                 st.subheader("Cumulative Returns")
                 try:
                     cumulative_returns = (1 + portfolio_returns).cumprod()
@@ -438,7 +411,6 @@ if st.session_state.analysis_generated and st.session_state.portfolio:
                 except Exception as e:
                     st.error(f"Error creating cumulative returns chart: {str(e)}")
             
-            # Additional Metrics
             st.subheader("Detailed Performance Metrics")
             col1, col2 = st.columns(2)
             
@@ -450,8 +422,7 @@ if st.session_state.analysis_generated and st.session_state.portfolio:
                         'Sortino Ratio': f"{qs.stats.sortino(portfolio_returns):.3f}",
                         'Calmar Ratio': f"{qs.stats.calmar(portfolio_returns):.3f}",
                         'Max Drawdown': f"{(qs.stats.max_drawdown(portfolio_returns) * 100):.2f}%",
-                        'VaR (95%)': f"{(qs.stats.value_at_risk(portfolio_returns) * 100):.2f}%",
-                        'Daily VaR': f"{(qs.stats.var(portfolio_returns) * 100):.2f}%"
+                        'VaR (95%)': f"{(qs.stats.value_at_risk(portfolio_returns) * 100):.2f}%"
                     }
                     for metric, value in risk_metrics.items():
                         st.write(f"**{metric}:** {value}")
@@ -466,15 +437,13 @@ if st.session_state.analysis_generated and st.session_state.portfolio:
                         'CAGR': f"{(qs.stats.cagr(portfolio_returns) * 100):.2f}%",
                         'Best Day': f"{(qs.stats.best(portfolio_returns) * 100):.2f}%",
                         'Worst Day': f"{(qs.stats.worst(portfolio_returns) * 100):.2f}%",
-                        'Avg Daily Return': f"{(portfolio_returns.mean() * 100):.3f}%",
-                        'Win Rate': f"{(qs.stats.win_rate(portfolio_returns) * 100):.1f}%"
+                        'Avg Daily Return': f"{(portfolio_returns.mean() * 100):.3f}%"
                     }
                     for metric, value in return_metrics.items():
                         st.write(f"**{metric}:** {value}")
                 except Exception as e:
                     st.error(f"Error calculating return metrics: {str(e)}")
             
-            # Download Report
             st.subheader("📥 Download Detailed Report")
             try:
                 html_report, report_msg = generate_quantstats_report(portfolio_returns)
@@ -485,10 +454,8 @@ if st.session_state.analysis_generated and st.session_state.portfolio:
                         data=html_report,
                         file_name="portfolio_analysis.html",
                         mime="text/html",
-                        use_container_width=True,
-                        help="Comprehensive report with advanced analytics and charts"
+                        use_container_width=True
                     )
-                    st.info("📖 The report includes detailed charts, rolling statistics, and full portfolio analytics.")
                 else:
                     st.warning(f"Could not generate downloadable report: {report_msg}")
             except Exception as e:
@@ -496,13 +463,10 @@ if st.session_state.analysis_generated and st.session_state.portfolio:
         
         else:
             st.error(f"❌ Analysis failed: {analysis_msg}")
-            st.info("💡 Please check your portfolio composition and date range, then try again.")
 
-# Initial state message
 elif not st.session_state.portfolio:
     st.info("👈 Start by searching and adding stocks to your portfolio in the sidebar.")
 
-# Footer
 st.markdown("---")
 st.markdown(
     "<div style='text-align: center; color: gray;'>"
