@@ -3,3 +3,4 @@ yfinance
 quantstats
 pandas
 plotly
+ipython
