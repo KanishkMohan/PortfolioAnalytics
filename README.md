@@ -1,1 +1,16 @@
-A comprehensive Streamlit-based dashboard for analyzing NSE (National Stock Exchange of India) stock portfolios. Built with Python, this tool allows users to search NSE stocks, build custom portfolios with weights, and generate detailed performance analytics using historical data from Yahoo Finance. It includes interactive visualizations, risk-return metrics powered by QuantStats, and downloadable HTML reports.
+# Portfolio Analytics Dashboard
+
+A Streamlit app for analyzing NSE stock portfolios using QuantStats.
+
+## How to Run Locally
+1. Install dependencies: `pip install -r requirements.txt`
+2. Run: `streamlit run Portfolio_Analytics.py`
+
+## Deployment
+Hosted on [Streamlit Cloud](https://share.streamlit.io/).
+
+## Features
+- Select NSE stocks and assign weights.
+- Compute key metrics like Sharpe Ratio, Max Drawdown, CAGR, and Volatility.
+- Visualize portfolio allocation, monthly returns, cumulative returns, and EOY returns.
+- Download a full QuantStats HTML report.
